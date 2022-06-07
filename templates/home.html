@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://unpkg.com/peerjs@1.3.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css" integrity="sha512-KfkfwYDsLkIlwQp6LFnl8zNdLGxu9YAA1QvwINks4PhcElQSvqcyVLLD9aMhXd13uQjoXtEKNosOWaZqXgel0g==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+</head>
+<body class="bg-slate-800">
+<div class="flex text-white justify-center items-center videos-container flex-wrap ">
+    <div class="flex m-2 flex-col h-72 rounded-lg items-center w-48 bg-black relative">
+        <div class="h-full flex items-center justify-center w-full">
+            <video muted id="localVideo" class="h-full w-full"></video>
+        </div>
+        <div class="absolute bottom-2 w-4/5 flex justify-around">
+            <button data-muted="false" onclick="TogglemutedPeerCamera(this);"><i class="fa fa-video"></i></button>
+            <button data-muted="false" onclick="TogglemutedPeerMicrophone(this);"><i class="fa fa-microphone"></i></button>
+            <button onclick="ShareScreenBtn(this);"><i class="fa fa-desktop"></i></button>
+            <button class="text-red-500"><i class="fa fa-phone"></i></button>
+
+        </div>
+    </div>
+</div>
+<script>
+    const localVideo = document.getElementById('localVideo')
+    localVideo.muted = true;
+    localVideo.volume = 0;
+
+    const createEmptyAudioTrack = () => {
+        const ctx = new AudioContext();
+        const oscillator = ctx.createOscillator();
+        const dst = oscillator.connect(ctx.createMediaStreamDestination());
+        oscillator.start();
+        const track = dst.stream.getAudioTracks()[0];
+        return Object.assign(track, { enabled: false });
+    };
+
+    const createEmptyVideoTrack = ({ width, height }) => {
+        const canvas = Object.assign(document.createElement('canvas'), { width, height });
+        canvas.getContext('2d').fillRect(0, 0, width, height);
+        const fakestream = canvas.captureStream();
+        const track = fakestream.getVideoTracks()[0];
+        return Object.assign(track, { enabled: false });
+    };
+
+    const createElementFun = args => {
+        const element = document.createElement(args.name)
+        element.className = args.classes || ""
+        element.id = args.id || ""
+
+
+        if(args.arguments)
+        {
+            console.log(args.arguments)
+            for (const [key, value] of Object.entries(args.arguments)) {
+            if (key === "muted") element.muted = true;
+            else
+            element.setAttribute(`${key}`, value)
+            
+        }
+    }
+        return element
+    }
+
+    const ShareScreenBtn = e => {
+        if(!stream) return
+
+        navigator.mediaDevices.getDisplayMedia({ video: true }).then((_stream) => {
+            e.classList.toggle("text-green-500")
+            const videoTracks = stream.getVideoTracks()[0]
+                stream = new MediaStream([stream.getAudioTracks()[0], _stream.getVideoTracks()[0]])
+                
+                setVideoStream(localVideo, stream)
+
+                stream.getVideoTracks()[0].onended = _ => {
+                    e.classList.toggle("text-green-500")
+                    stream = new MediaStream([stream.getAudioTracks()[0], videoTracks])
+                    setVideoStream(localVideo, stream)
+                    for (var i = 0; i < peers.length; i++) {
+                        peers[i].peerConnection.getSenders().map(function (sender) {
+                            return sender.replaceTrack(stream.getVideoTracks()[0]).catch((err) => console.log(err))
+                        });
+                    }    
+                }
+                
+                for (var i = 0; i < peers.length; i++) {
+                    peers[i].peerConnection.getSenders().map(function (sender) {
+                        return sender.replaceTrack(stream.getVideoTracks()[0]).catch((err) => console.log(err))
+                    });
+                }
+            }).catch((err) => console.log(`${err}`))
+    }
+    
+    let stream;
+    const peers = []
+    const peer = new Peer(makeid(10))
+    ws_scheme = window.location.protocol == "https:" ? "wss" : "ws";
+    const meetingSocket = new WebSocket(`${ws_scheme}://${window.location.host}/video-meeting/${peer.id}/`)
+    
+    const setVideoStream = (video, _stream) => {
+        video.srcObject = _stream
+        video.onloadedmetadata = _ => {
+            video.play();
+        }
+    }
+
+    const startMeeting = _ => {
+        if (meetingSocket.readyState === 1) {
+            meetingSocket.send(JSON.stringify({ function: 'newUser', "parameter": peer.id, id: window.userID }))
+            } else {
+                meetingSocket.onopen = e => meetingSocket.send(JSON.stringify({ function: 'newUser', "parameter": peer.id, id: window.userID }))
+            }
+
+        
+    }
+
+    const TogglemutedPeerCamera = e => {
+        if(!stream) return
+        stream.getVideoTracks()[0].enabled = !stream.getVideoTracks()[0].enabled;
+        if(!stream.getVideoTracks()[0].enabled)
+        {
+            e.dataset.muted = "true"
+            e.innerHTML = `<i class="fa fa-video-slash"></i>`
+        }
+
+        else {
+            e.dataset.muted = "false"
+            e.innerHTML = `<i class="fa fa-video"></i>`
+        }
+    }
+
+    const TogglemutedPeerMicrophone = e => {
+        if(!stream) return
+        stream.getAudioTracks()[0].enabled = !stream.getAudioTracks()[0].enabled;
+        if(!stream.getAudioTracks()[0].enabled)
+        {
+            e.dataset.muted = "true"
+            e.innerHTML = `<i class="fa fa-microphone-slash"></i>`
+        }
+
+        else {
+            e.dataset.muted = "false"
+            e.innerHTML = `<i class="fa fa-microphone"></i>`
+        }
+    }
+
+
+    const newVideoRenderer = id => {
+        const videosWrapper = document.querySelector('.videos-container')
+        const container = createElementFun({ name: "div", classes: "m-2 flex flex-col h-72 rounded-lg items-center w-48 bg-black relative", id: `user-container-${id}` })
+        const SubContainer = createElementFun({ name: "div", classes: "h-full flex items-center justify-center w-full" })
+
+        container.appendChild(SubContainer)
+        SubContainer.appendChild(createElementFun({ name: 'video', classes: "h-full w-full", id: `user-${id}`}))
+        videosWrapper.appendChild(container)
+        
+    }
+
+    const newUser = e => {
+        call = peer.call(e.parameter, stream)
+        peers.push(call)
+        let renderedVideo = newVideoRenderer(e.parameter)
+        call.on('stream', remoteStream => {
+
+            setVideoStream(document.getElementById(`user-${e.parameter}`), remoteStream)
+        })
+    }
+
+    meetingSocket.onmessage = e => {
+        const data = JSON.parse(e.data)
+        if (data.function === "newUser" && data.parameter != peer.id) {
+            newUser(data)
+        }
+
+        if (data.function === "userLeft") {
+            document.querySelector(`#user-container-${data.parameter}`).remove()
+        }
+    }
+
+    peer.on('call', call => {
+        let renderedVideo = newVideoRenderer(call.peer)
+        peers.push(call)
+        call.answer(stream)
+        call.on('stream', remoteStream => {
+            setVideoStream(document.getElementById(`user-${call.peer}`), remoteStream)
+        })
+    })
+
+    function makeid(length) {
+        var result = '';
+        var characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        var charactersLength = characters.length;
+        for (var i = 0; i < length; i++) {
+            result += characters.charAt(Math.floor(Math.random() *
+                charactersLength));
+        }
+        return result;
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((localstream) => {
+        stream = localstream
+        setVideoStream(localVideo, stream)
+        startMeeting()
+
+    })
+        .catch(_ => {
+            navigator.mediaDevices.getUserMedia({ video: true }).then((localstream) => {
+                const audioTrack = createEmptyAudioTrack();
+                const _myStream = new MediaStream([audioTrack, localstream.getVideoTracks()[0]])
+                stream = localstream
+                setVideoStream(localVideo, stream)
+                startMeeting()
+            })
+                .catch(_ => {
+                    navigator.mediaDevices.getUserMedia({ audio: true }).then((localstream) => {
+                        const videoTrack = createEmptyVideoTrack({ width: 640, height: 480 });
+                        const _myStream = new MediaStream([localstream.getAudioTracks()[0], videoTrack])
+                        stream = localstream
+                        setVideoStream(localVideo, stream)
+                        startMeeting()
+                    })
+                        .catch((e) => {
+                            localVideo.parentElement.innerHTML = `<h1>No feed</h1>`
+                            window.showSnackBar({text : "you have no hardware, get at least a microphone to join the meeting"})
+                            // stream = new MediaStream([createEmptyAudioTrack(), createEmptyVideoTrack({ width: 640, height: 480 })])
+                            // startMeeting()
+                        })
+                })
+        })
+</script>
+
+</body>
+</html>
